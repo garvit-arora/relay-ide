@@ -13,6 +13,7 @@
     "Machine Learning"
   ],
   "activationEvents": [
+    "onStartupFinished",
     "onView:relay.teamView",
     "onCommand:relay.openOnboarding"
   ],
@@ -33,10 +34,10 @@
       }
     ],
     "viewsContainers": {
-      "activitybar": [
+      "secondarySidebar": [
         {
           "id": "relay",
-          "title": "Agents",
+          "title": "Relay Code",
           "icon": "media/relay.svg"
         }
       ]
@@ -46,7 +47,7 @@
         {
           "type": "webview",
           "id": "relay.teamView",
-          "name": "Chat with Agent"
+          "name": "Chat with Relay Code"
         }
       ]
     },

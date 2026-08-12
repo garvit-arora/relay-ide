@@ -105,3 +105,53 @@ index 025b1487..fbe48131 100644
 +	// Generate an anonymous development identifier without native registry modules.
 +	return uuid.generateUuid();
  }
+diff --git a/src/vs/workbench/contrib/chat/browser/chatParticipant.contribution.ts b/src/vs/workbench/contrib/chat/browser/chatParticipant.contribution.ts
+index 8fb472b3..83e91d04 100644
+--- a/src/vs/workbench/contrib/chat/browser/chatParticipant.contribution.ts
++++ b/src/vs/workbench/contrib/chat/browser/chatParticipant.contribution.ts
+@@ -68,17 +68,9 @@ const chatViewDescriptor: IViewDescriptor = {
+ 		order: 1
+ 	},
+ 	ctorDescriptor: new SyncDescriptor(ChatViewPane),
+-	when: ContextKeyExpr.and(
+-		ChatContextKeys.accountPolicyGateActive.negate(),
+-		ContextKeyExpr.or(
+-			ContextKeyExpr.and(
+-				ChatContextKeys.Setup.hidden.negate(),
+-				ChatContextKeys.Setup.disabledInWorkspace.negate(),
+-			),
+-			ChatContextKeys.panelParticipantRegistered,
+-			ChatContextKeys.extensionInvalid
+-		)
+-	)
++	// Relay replaces the built-in Copilot-oriented chat surface with its own
++	// persistent multi-agent workspace in the secondary side bar.
++	when: ContextKeyExpr.false()
+ };
+ Registry.as<IViewsRegistry>(ViewExtensions.ViewsRegistry).registerViews([chatViewDescriptor], chatViewContainer);
+ 
+diff --git a/src/vs/workbench/workbench.common.main.ts b/src/vs/workbench/workbench.common.main.ts
+index 6789f3e6..d63fe7ab 100644
+--- a/src/vs/workbench/workbench.common.main.ts
++++ b/src/vs/workbench/workbench.common.main.ts
+@@ -225,17 +225,14 @@ import './contrib/notebook/browser/notebook.contribution.js';
+ // Speech
+ import './contrib/speech/browser/speech.contribution.js';
+ 
+-// Chat
++// Relay keeps VS Code's shared chat services because notebooks, tasks, debugging,
++// terminals, and language-model tools depend on them. Only the built-in Chat view
++// contribution is omitted; Relay Code owns the secondary-side-bar surface.
+ import './contrib/chat/browser/chat.shared.contribution.js';
+ import './contrib/chat/browser/chat.contribution.js';
+ import './contrib/chat/browser/agentSessions/agentHost/agentHost.contribution.js';
+-import './contrib/chat/browser/chat.view.contribution.js';
+ import './contrib/inlineChat/browser/inlineChat.contribution.js';
+-
+-// Copilot Voice
+ import './contrib/agentsVoice/browser/agentsVoice.contribution.js';
+-
+-// Floating Chat Input Window
+ import './contrib/chat/browser/chatInputWindow/chatInputWindow.contribution.js';
+ import './contrib/mcp/browser/mcp.contribution.js';
+ import './contrib/mcp/browser/mcp.view.contribution.js';

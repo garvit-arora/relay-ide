@@ -18,6 +18,7 @@ fs.mkdirSync(dataRoot, { recursive: true });
 const defaults = {
   displayName: '', teamServerUrl: '', defaultProvider: 'codex', onboardingComplete: false,
   providers: {
+    relay: { enabled: true, executable: '', engine: 'auto', model: '', endpoint: '', deployment: '', customArgs: [] },
     codex: { enabled: true, executable: 'codex', model: '', endpoint: '', deployment: '', customArgs: [] },
     claude: { enabled: false, executable: 'claude', model: '', endpoint: '', deployment: '', customArgs: [] },
     opencode: { enabled: false, executable: 'opencode', model: '', endpoint: '', deployment: '', customArgs: [] },
@@ -130,8 +131,8 @@ function consumeCoordinationLine(agentId, line) {
     collaboration.action(event.type, event.payload || {}, agentId);
   } catch (error) { emitProcess(agentId, 'stderr', `Invalid RELAY_EVENT: ${error.message}`); }
 }
-function spawnProcess({ id, executable, args = [], cwd, env = {}, shell = false, taskId = null }) {
-  const child = spawn(executable, args, { cwd, env: { ...process.env, ...env, RELAY_AGENT_ID: id, RELAY_TASK_ID: taskId || '', RELAY_BACKEND_URL: 'http://127.0.0.1:4173' }, shell, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+function spawnProcess({ id, executable, args = [], cwd, env = {}, shell = false, taskId = null, stdin = 'ignore' }) {
+  const child = spawn(executable, args, { cwd, env: { ...process.env, ...env, RELAY_AGENT_ID: id, RELAY_TASK_ID: taskId || '', RELAY_BACKEND_URL: 'http://127.0.0.1:4173' }, shell, windowsHide: true, stdio: [stdin, 'pipe', 'pipe'] });
   processes.set(id, child); emitProcess(id, 'started', `Started ${executable}`); if (collaboration.state.agents[id]) collaboration.setAgentStatus(id, 'working', `Running ${executable}`, 5);
   const pipe = (stream, kind) => { let pending = ''; stream.setEncoding('utf8'); stream.on('data', chunk => { pending += chunk; const lines = pending.split(/\r?\n/); pending = lines.pop(); for (const line of lines) if (line) { consumeCoordinationLine(id, line); emitProcess(id, kind, line); } }); stream.on('end', () => { if (pending) { consumeCoordinationLine(id, pending); emitProcess(id, kind, pending); } }); };
   pipe(child.stdout, 'stdout'); pipe(child.stderr, 'stderr');
@@ -143,16 +144,33 @@ function agentContext(agentId, task, prompt) {
   const relayCli = JSON.stringify(path.join(appRoot, 'scripts', 'relay-agent.js'));
   const state = collaboration.snapshot();
   const teammates = Object.values(state.agents).filter(agent => agent.id !== agentId).map(agent => ({ id: agent.id, status: agent.status, taskId: agent.taskId, files: agent.files }));
-  return `${prompt}\n\nYou are ${agentId}, a first-class teammate in Relay. Your task id is ${task.id}.\nActive teammates: ${JSON.stringify(teammates)}\nOpen tasks: ${JSON.stringify(Object.values(state.tasks).filter(item => item.status !== 'done').map(item => ({ id: item.id, title: item.title, assignee: item.assignee, status: item.status, dependsOn: item.dependsOn })))}\nBefore editing a shared file, claim it with: node \"C:/Users/workw/.ao/data/worktrees/scratch/workers/scratch-2/scripts/relay-agent.js\" file.claim --file <path>\nMessage another agent with: node \"C:/Users/workw/.ao/data/worktrees/scratch/workers/scratch-2/scripts/relay-agent.js\" message.send --to <agent-id> --text <message>\nDeclare a dependency with: node \"C:/Users/workw/.ao/data/worktrees/scratch/workers/scratch-2/scripts/relay-agent.js\" task.dependency --taskId ${task.id} --dependencyId <task-id>\nAsk a human with: node \"C:/Users/workw/.ao/data/worktrees/scratch/workers/scratch-2/scripts/relay-agent.js\" decision.request --taskId ${task.id} --title <question> --detail <context>\nRecord durable decisions with: node \"C:/Users/workw/.ao/data/worktrees/scratch/workers/scratch-2/scripts/relay-agent.js\" memory.create --title <title> --content <content>\nRelease files when done. Do not invent teammate responses; use the Relay commands and wait for real state changes.`;
+  const identity = task.metadata?.provider === 'relay' ? "You are Relay Code, Relay IDE's native coding agent. You are not GitHub Copilot. Use the configured open coding engine while preserving Relay coordination, file ownership, decisions, and rooms." : `You are ${agentId}, a first-class teammate in Relay.`;
+  return `${prompt}\n\n${identity} Your task id is ${task.id}.\nActive teammates: ${JSON.stringify(teammates)}\nOpen tasks: ${JSON.stringify(Object.values(state.tasks).filter(item => item.status !== 'done').map(item => ({ id: item.id, title: item.title, assignee: item.assignee, status: item.status, dependsOn: item.dependsOn })))}\nBefore editing a shared file, claim it with: node ${relayCli} file.claim --file <path>\nMessage another agent with: node ${relayCli} message.send --to <agent-id> --text <message>\nDeclare a dependency with: node ${relayCli} task.dependency --taskId ${task.id} --dependencyId <task-id>\nAsk a human with: node ${relayCli} decision.request --taskId ${task.id} --title <question> --detail <context>\nRecord durable decisions with: node ${relayCli} memory.create --title <title> --content <content>\nRelease files when done. Do not invent teammate responses; use the Relay commands and wait for real state changes.`;
+}
+function repairStaleCodexCache() {
+  const cache = path.join(os.homedir(), '.codex', 'models_cache.json');
+  try {
+    const text = fs.readFileSync(cache, 'utf8');
+    if (!text.includes('supports_reasoning_summaries')) {
+      const backup = `${cache}.relay-stale-${Date.now()}`;
+      fs.renameSync(cache, backup);
+      broadcast('runtime.notice', { provider: 'codex', level: 'info', text: 'Relay removed an incompatible Codex model cache. Codex will refresh it automatically.', backup });
+    }
+  } catch {}
 }
 function startAgent(request) {
-  const root = canonicalWorkspace(request.workspace); const id = `agent-${crypto.randomUUID()}`; const provider = request.provider;
-  const task = request.taskId && collaboration.state.tasks[request.taskId] ? collaboration.state.tasks[request.taskId] : collaboration.createTask({ title: request.prompt.slice(0, 120), description: request.prompt, createdBy: config.displayName || 'human', assignee: id, metadata: { provider } });
-  collaboration.registerAgent({ id, name: request.name || `${provider} agent`, provider, ownerId: config.displayName || 'human', taskId: task.id });
+  const root = canonicalWorkspace(request.workspace); const id = `agent-${crypto.randomUUID()}`; let provider = request.provider;
+  const requestedProvider = provider;
+  if (provider === 'relay') {
+    const preferred = config.providers.relay?.engine;
+    provider = preferred && preferred !== 'auto' ? preferred : (commandInfo('opencode', 'OpenCode').installed ? 'opencode' : commandInfo('codex', 'Codex').installed ? 'codex' : commandInfo('claude', 'Claude').installed ? 'claude' : 'custom');
+  }
+  const task = request.taskId && collaboration.state.tasks[request.taskId] ? collaboration.state.tasks[request.taskId] : collaboration.createTask({ title: request.prompt.slice(0, 120), description: request.prompt, createdBy: config.displayName || 'human', assignee: id, metadata: { provider: requestedProvider, engine: provider } });
+  collaboration.registerAgent({ id, name: request.name || (requestedProvider === 'relay' ? 'Relay Code' : `${provider} agent`), provider: requestedProvider, engine: provider, ownerId: config.displayName || 'human', taskId: task.id });
   if (task.assignee !== id) collaboration.assignTask(task.id, id);
   const prompt = agentContext(id, task, request.prompt);
   const common = { id, cwd: root, taskId: task.id };
-  if (provider === 'codex') spawnProcess({ ...common, executable: config.providers.codex.executable || 'codex', args: ['exec', '--json', '--color', 'never', '--sandbox', 'workspace-write', '--skip-git-repo-check', '-C', root, ...(request.model ? ['-m', request.model] : []), prompt] });
+  if (provider === 'codex') { repairStaleCodexCache(); spawnProcess({ ...common, stdin: 'inherit', executable: config.providers.codex.executable || 'codex', args: ['exec', '--json', '--color', 'never', '--sandbox', 'workspace-write', '--skip-git-repo-check', '-C', root, ...(request.model ? ['-m', request.model] : []), prompt] }); }
   else if (provider === 'claude') spawnProcess({ ...common, executable: config.providers.claude.executable || 'claude', args: ['-p', prompt, '--output-format', 'stream-json', '--verbose'] });
   else if (provider === 'opencode') spawnProcess({ ...common, executable: config.providers.opencode.executable || 'opencode', args: ['run', ...(request.model ? ['--model', request.model] : []), prompt] });
   else if (provider === 'custom') {
@@ -161,7 +179,7 @@ function startAgent(request) {
   } else if (provider === 'azure') {
     const azure = config.providers.azure; const key = loadSecrets().azure; if (!key) throw new Error('Azure API key is not configured'); if (!azure.endpoint || !azure.deployment) throw new Error('Azure endpoint and deployment are required');
     const endpoint = azure.endpoint.replace(/\/$/, '') + '/openai/v1';
-    spawnProcess({ ...common, executable: azure.executable || 'codex', env: { AZURE_OPENAI_API_KEY: key }, args: ['exec', '--json', '--color', 'never', '--sandbox', 'workspace-write', '--skip-git-repo-check', '-C', root, '-c', 'model_provider="azure"', '-c', 'model_providers.azure.name="Azure OpenAI"', '-c', `model_providers.azure.base_url="${endpoint}"`, '-c', 'model_providers.azure.env_key="AZURE_OPENAI_API_KEY"', '-c', 'model_providers.azure.wire_api="responses"', '-m', request.model || azure.deployment, prompt] });
+    repairStaleCodexCache(); spawnProcess({ ...common, stdin: 'inherit', executable: azure.executable || 'codex', env: { AZURE_OPENAI_API_KEY: key }, args: ['exec', '--json', '--color', 'never', '--sandbox', 'workspace-write', '--skip-git-repo-check', '-C', root, '-c', 'model_provider="azure"', '-c', 'model_providers.azure.name="Azure OpenAI"', '-c', `model_providers.azure.base_url="${endpoint}"`, '-c', 'model_providers.azure.env_key="AZURE_OPENAI_API_KEY"', '-c', 'model_providers.azure.wire_api="responses"', '-m', request.model || azure.deployment, prompt] });
   } else throw new Error('Unsupported provider');
   return { id, taskId: task.id };
 }
