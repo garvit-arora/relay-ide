@@ -1,0 +1,12 @@
+node_modules/
+.relay-data/
+*.log
+*.png
+!.ao/attachments/*.png
+.ao/
+src-tauri/target/
+vendor/vscode/node_modules/
+vendor/vscode/out/
+vendor/vscode/out-build/
+vendor/vscode/.build/
+vendor/vscode/extensions/**/node_modules/

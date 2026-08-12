@@ -1,0 +1,24 @@
+{
+  "name": "relay-desktop-ide",
+  "version": "0.4.0",
+  "private": true,
+  "description": "Tauri desktop IDE built on Code-OSS with local Git, terminals, AI agents, and real-time collaboration",
+  "scripts": {
+    "dev": "tauri dev --config src-tauri/tauri.dev.conf.json",
+    "desktop:dev": "tauri dev --config src-tauri/tauri.dev.conf.json",
+    "desktop:build": "tauri build",
+    "desktop:check": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-tauri-docker.ps1",
+    "backend": "node server.js",
+    "codeoss:compile": "npm --prefix vendor/vscode run compile-client",
+    "codeoss:server": "node scripts/start-codeoss.js",
+    "test": "node --test test/*.test.js",
+    "verify": "npm test && npm run desktop:check"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.11.1",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.4"
+  }
+}

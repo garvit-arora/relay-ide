@@ -1,0 +1,28 @@
+{
+  "name": "relay-team",
+  "displayName": "Relay AI Team",
+  "description": "Real-time multi-user and multi-agent coordination for Relay IDE.",
+  "version": "0.1.0",
+  "publisher": "relay",
+  "license": "MIT",
+  "engines": { "vscode": "^1.90.0" },
+  "categories": ["Other", "Machine Learning"],
+  "activationEvents": ["onView:relay.teamView", "onCommand:relay.openOnboarding"],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "relay.openOnboarding", "title": "Relay: Open Onboarding" },
+      { "command": "relay.runAgent", "title": "Relay: Run AI Agent" },
+      { "command": "relay.openWarRoom", "title": "Relay: Open War Room" }
+    ],
+    "viewsContainers": {
+      "activitybar": [{ "id": "relay", "title": "AI Team", "icon": "media/relay.svg" }]
+    },
+    "views": {
+      "relay": [{ "type": "webview", "id": "relay.teamView", "name": "Workspace Agents" }]
+    },
+    "menus": {
+      "view/title": [{ "command": "relay.openOnboarding", "when": "view == relay.teamView", "group": "navigation" }]
+    }
+  }
+}

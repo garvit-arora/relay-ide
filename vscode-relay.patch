@@ -1,0 +1,107 @@
+diff --git a/extensions/html-language-features/esbuild.browser.mts b/extensions/html-language-features/esbuild.browser.mts
+index 0e4c1ec9..08673a6f 100644
+--- a/extensions/html-language-features/esbuild.browser.mts
++++ b/extensions/html-language-features/esbuild.browser.mts
+@@ -4,6 +4,7 @@
+  *--------------------------------------------------------------------------------------------*/
+ import * as fs from 'node:fs';
+ import * as path from 'node:path';
++import { fileURLToPath } from 'node:url';
+ import type * as esbuild from 'esbuild';
+ import { run } from '../esbuild-extension-common.mts';
+ 
+@@ -19,7 +20,7 @@ function javaScriptLibsPlugin(): esbuild.Plugin {
+ 		name: 'javascript-libs',
+ 		setup(build) {
+ 			build.onLoad({ filter: /javascriptLibs\.ts$/ }, () => {
+-				const TYPESCRIPT_LIB_SOURCE = path.dirname(import.meta.resolve('typescript').replace('file://', ''));
++				const TYPESCRIPT_LIB_SOURCE = path.dirname(fileURLToPath(import.meta.resolve('typescript')));
+ 				const JQUERY_DTS = path.join(extensionRoot, 'server', 'lib', 'jquery.d.ts');
+ 
+ 				function getFileName(name: string): string {
+diff --git a/package.json b/package.json
+index ad4646d6..a096f757 100644
+--- a/package.json
++++ b/package.json
+@@ -219,6 +219,7 @@
+     "debounce": "^1.0.0",
+     "deemon": "^1.13.6",
+     "electron": "42.8.1",
++    "esbuild": "^0.28.2",
+     "eslint": "10.8.0",
+     "eslint-formatter-compact": "^8.40.0",
+     "eslint-plugin-header": "3.1.1",
+@@ -236,9 +237,11 @@
+     "gulp-gunzip": "^1.0.0",
+     "gulp-gzip": "^1.4.2",
+     "gulp-json-editor": "^2.5.0",
++    "gulp-merge-json": "^2.2.1",
+     "gulp-plumber": "^1.2.0",
+     "gulp-rename": "^1.2.0",
+     "gulp-replace": "^0.5.4",
++    "gulp-sort": "^2.0.0",
+     "gulp-sourcemaps": "^3.0.0",
+     "gulp-svgmin": "^4.1.0",
+     "husky": "^0.13.1",
+@@ -249,6 +252,7 @@
+     "istanbul-lib-source-maps": "^4.0.1",
+     "istanbul-reports": "^3.1.5",
+     "js-yaml": "^4.2.0",
++    "jsonc-parser": "^3.3.1",
+     "lazy.js": "^0.4.2",
+     "merge-options": "^1.0.1",
+     "mime": "^1.4.1",
+@@ -267,6 +271,7 @@
+     "sinon-test": "^3.1.3",
+     "source-map": "0.6.1",
+     "source-map-support": "^0.5.21",
++    "ternary-stream": "^3.0.0",
+     "tsec": "0.2.7",
+     "tslib": "^2.6.3",
+     "typescript": "npm:@typescript/typescript6@^6.0.2",
+diff --git a/src/vs/base/node/id.ts b/src/vs/base/node/id.ts
+index 025b1487..fbe48131 100644
+--- a/src/vs/base/node/id.ts
++++ b/src/vs/base/node/id.ts
+@@ -7,8 +7,6 @@ import { networkInterfaces } from 'os';
+ import { TernarySearchTree } from '../common/ternarySearchTree.js';
+ import * as uuid from '../common/uuid.js';
+ import { getMac } from './macAddress.js';
+-import { isWindows } from '../common/platform.js';
+-import { stripUTF8BOM } from '../common/strings.js';
+ 
+ // http://www.techrepublic.com/blog/data-center/mac-address-scorecard-for-common-virtual-machine-platforms/
+ // VMware ESX 3, Server, Workstation, Player	00-50-56, 00-0C-29, 00-05-69
+@@ -102,27 +100,12 @@ async function getMacMachineId(errorLogger: (error: Error) => void): Promise<str
+ 	}
+ }
+ 
+-const SQM_KEY: string = 'Software\\Microsoft\\SQMClient';
+-export async function getSqmMachineId(errorLogger: (error: Error) => void): Promise<string> {
+-	if (isWindows) {
+-		const Registry = await import('@vscode/windows-registry');
+-		try {
+-			return Registry.GetStringRegKey('HKEY_LOCAL_MACHINE', SQM_KEY, 'MachineId') || '';
+-		} catch (err) {
+-			errorLogger(err);
+-			return '';
+-		}
+-	}
++export async function getSqmMachineId(_errorLogger: (error: Error) => void): Promise<string> {
++	// Relay's Code-OSS server does not read the Windows registry.
+ 	return '';
+ }
+ 
+-export async function getDevDeviceId(errorLogger: (error: Error) => void): Promise<string> {
+-	try {
+-		const deviceIdPackage = await import('@vscode/deviceid');
+-		const id = await deviceIdPackage.getDeviceId();
+-		return stripUTF8BOM(id);
+-	} catch (err) {
+-		errorLogger(err);
+-		return uuid.generateUuid();
+-	}
++export async function getDevDeviceId(_errorLogger: (error: Error) => void): Promise<string> {
++	// Generate an anonymous development identifier without native registry modules.
++	return uuid.generateUuid();
+ }

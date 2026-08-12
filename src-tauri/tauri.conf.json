@@ -1,0 +1,61 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "Relay IDE",
+  "version": "0.4.0",
+  "identifier": "dev.relay.ide",
+  "build": {
+    "frontendDist": "../desktop-shell"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Relay IDE",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1050,
+        "minHeight": 680,
+        "resizable": true,
+        "fullscreen": false,
+        "center": true,
+        "backgroundColor": "#080a0f",
+        "decorations": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis",
+      "msi"
+    ],
+    "publisher": "Relay",
+    "shortDescription": "Collaborative multi-agent desktop IDE",
+    "longDescription": "A Code-OSS based desktop IDE with local files, Git, terminals, AI coding agents, and real-time team collaboration.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "../server.js": "runtime/server.js",
+      "../coordinator.js": "runtime/coordinator.js",
+      "../node_modules/ws": "runtime/node_modules/ws",
+      "../relay-extensions": "runtime/relay-extensions",
+      "../vendor/vscode/out": "runtime/vendor/vscode/out",
+      "../vendor/vscode/extensions": "runtime/vendor/vscode/extensions",
+      "../vendor/vscode/node_modules": "runtime/vendor/vscode/node_modules",
+      "../vendor/vscode/resources": "runtime/vendor/vscode/resources",
+      "../vendor/vscode/package.json": "runtime/vendor/vscode/package.json",
+      "../vendor/vscode/product.json": "runtime/vendor/vscode/product.json",
+      "../vendor/vscode/LICENSE.txt": "runtime/vendor/vscode/LICENSE.txt",
+      "../vendor/vscode/ThirdPartyNotices.txt": "runtime/vendor/vscode/ThirdPartyNotices.txt",
+      "../vendor/vscode/.build/node/v24.18.1/win32-x64": "runtime/vendor/vscode/.build/node/v24.18.1/win32-x64"
+    }
+  }
+}
