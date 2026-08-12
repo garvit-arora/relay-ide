@@ -1,3 +1,15 @@
 [submodule "vendor/vscode"]
 	path = vendor/vscode
 	url = https://github.com/microsoft/vscode.git
+[submodule "vendor/void"]
+	path = vendor/void
+	url = https://github.com/voideditor/void.git
+[submodule "vendor/pearai"]
+	path = vendor/pearai
+	url = https://github.com/trypear/pearai-app.git
+[submodule "vendor/pearai-continue"]
+	path = vendor/pearai-continue
+	url = https://github.com/trypear/pearai-submodule.git
+[submodule "vendor/pearai-roo"]
+	path = vendor/pearai-roo
+	url = https://github.com/trypear/PearAI-Roo-Code.git
