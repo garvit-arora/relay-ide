@@ -5,7 +5,7 @@ const os = require('os');
 const crypto = require('crypto');
 const { spawn, spawnSync } = require('child_process');
 const WebSocket = require('ws');
-const { createWorkspace } = require('./coordinator');
+const { LiveCoordinator } = require('./live-coordinator');
 
 const appRoot = __dirname;
 const staticRoot = fs.existsSync(path.join(appRoot, 'dist')) ? path.join(appRoot, 'dist') : path.join(appRoot, 'public');
@@ -28,7 +28,7 @@ const defaults = {
 let config = loadJson(settingsPath, defaults);
 config = { ...defaults, ...config, providers: { ...defaults.providers, ...(config.providers || {}) } };
 const requestedWorkspace = process.env.RELAY_WORKSPACE && fs.existsSync(process.env.RELAY_WORKSPACE) ? fs.realpathSync(process.env.RELAY_WORKSPACE) : null;
-let activeWorkspace = config.lastWorkspace && fs.existsSync(config.lastWorkspace) ? fs.realpathSync(config.lastWorkspace) : requestedWorkspace;
+let activeWorkspace = requestedWorkspace || (config.lastWorkspace && fs.existsSync(config.lastWorkspace) ? fs.realpathSync(config.lastWorkspace) : null);
 const clients = new Set();
 const processes = new Map();
 const safeJson = value => JSON.stringify(value);
@@ -59,6 +59,7 @@ function saveSecrets(secrets) {
 function mergeSecrets(next) { const secrets = { ...loadSecrets() }; for (const [key, value] of Object.entries(next || {})) if (String(value).trim()) secrets[key] = String(value); saveSecrets(secrets); }
 function send(socket, type, payload) { if (socket.readyState === WebSocket.OPEN) socket.send(safeJson({ type, payload, at: new Date().toISOString() })); }
 function broadcast(type, payload) { for (const socket of clients) send(socket, type, payload); }
+const collaboration = new LiveCoordinator({ root: activeWorkspace || appRoot, dataDir: dataRoot, emit: broadcast });
 function reply(res, status, value) { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); res.end(safeJson(value)); }
 function parseBody(req) { return new Promise((resolve, reject) => { let body = ''; req.on('data', c => { body += c; if (body.length > 10_000_000) reject(new Error('Request too large')); }); req.on('end', () => { try { resolve(body ? JSON.parse(body) : {}); } catch { reject(new Error('Invalid JSON')); } }); req.on('error', reject); }); }
 function canonicalWorkspace(requested) {
@@ -120,32 +121,51 @@ function discoverSkills() {
   for (const [source, dir] of roots) walk(source, dir); return result;
 }
 function emitProcess(id, kind, text) { broadcast('agent-event', { agentId: id, kind, text: String(text), at: now() }); }
-function spawnProcess({ id, executable, args = [], cwd, env = {}, shell = false }) {
-  const child = spawn(executable, args, { cwd, env: { ...process.env, ...env }, shell, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
-  processes.set(id, child); emitProcess(id, 'started', `Started ${executable}`);
-  const pipe = (stream, kind) => { let pending = ''; stream.setEncoding('utf8'); stream.on('data', chunk => { pending += chunk; const lines = pending.split(/\r?\n/); pending = lines.pop(); for (const line of lines) if (line) emitProcess(id, kind, line); }); stream.on('end', () => { if (pending) emitProcess(id, kind, pending); }); };
+function consumeCoordinationLine(agentId, line) {
+  const marker = 'RELAY_EVENT:';
+  const index = line.indexOf(marker);
+  if (index < 0) return;
+  try {
+    const event = JSON.parse(line.slice(index + marker.length).trim());
+    collaboration.action(event.type, event.payload || {}, agentId);
+  } catch (error) { emitProcess(agentId, 'stderr', `Invalid RELAY_EVENT: ${error.message}`); }
+}
+function spawnProcess({ id, executable, args = [], cwd, env = {}, shell = false, taskId = null }) {
+  const child = spawn(executable, args, { cwd, env: { ...process.env, ...env, RELAY_AGENT_ID: id, RELAY_TASK_ID: taskId || '', RELAY_BACKEND_URL: 'http://127.0.0.1:4173' }, shell, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  processes.set(id, child); emitProcess(id, 'started', `Started ${executable}`); if (collaboration.state.agents[id]) collaboration.setAgentStatus(id, 'working', `Running ${executable}`, 5);
+  const pipe = (stream, kind) => { let pending = ''; stream.setEncoding('utf8'); stream.on('data', chunk => { pending += chunk; const lines = pending.split(/\r?\n/); pending = lines.pop(); for (const line of lines) if (line) { consumeCoordinationLine(id, line); emitProcess(id, kind, line); } }); stream.on('end', () => { if (pending) { consumeCoordinationLine(id, pending); emitProcess(id, kind, pending); } }); };
   pipe(child.stdout, 'stdout'); pipe(child.stderr, 'stderr');
-  child.on('error', error => emitProcess(id, 'stderr', error.message));
-  child.on('close', code => { processes.delete(id); emitProcess(id, 'exit', `Process finished with ${code ?? -1}`); });
+  child.on('error', error => { emitProcess(id, 'stderr', error.message); if (collaboration.state.agents[id]) collaboration.setAgentStatus(id, 'failed', error.message); });
+  child.on('close', code => { processes.delete(id); const success = code === 0; emitProcess(id, 'exit', `Process finished with ${code ?? -1}`); if (taskId) collaboration.completeTask(taskId, { actor: id, success, summary: success ? 'Agent process completed successfully.' : `Agent process exited with ${code ?? -1}.` }); else if (collaboration.state.agents[id]) collaboration.setAgentStatus(id, success ? 'done' : 'failed', `Exit ${code ?? -1}`, 100); });
 }
 function shellCommand(command) { return process.platform === 'win32' ? { executable: 'powershell.exe', args: ['-NoLogo', '-NoProfile', '-Command', command] } : { executable: 'sh', args: ['-lc', command] }; }
+function agentContext(agentId, task, prompt) {
+  const relayCli = JSON.stringify(path.join(appRoot, 'scripts', 'relay-agent.js'));
+  const state = collaboration.snapshot();
+  const teammates = Object.values(state.agents).filter(agent => agent.id !== agentId).map(agent => ({ id: agent.id, status: agent.status, taskId: agent.taskId, files: agent.files }));
+  return `${prompt}\n\nYou are ${agentId}, a first-class teammate in Relay. Your task id is ${task.id}.\nActive teammates: ${JSON.stringify(teammates)}\nOpen tasks: ${JSON.stringify(Object.values(state.tasks).filter(item => item.status !== 'done').map(item => ({ id: item.id, title: item.title, assignee: item.assignee, status: item.status, dependsOn: item.dependsOn })))}\nBefore editing a shared file, claim it with: node \"C:/Users/workw/.ao/data/worktrees/scratch/workers/scratch-2/scripts/relay-agent.js\" file.claim --file <path>\nMessage another agent with: node \"C:/Users/workw/.ao/data/worktrees/scratch/workers/scratch-2/scripts/relay-agent.js\" message.send --to <agent-id> --text <message>\nDeclare a dependency with: node \"C:/Users/workw/.ao/data/worktrees/scratch/workers/scratch-2/scripts/relay-agent.js\" task.dependency --taskId ${task.id} --dependencyId <task-id>\nAsk a human with: node \"C:/Users/workw/.ao/data/worktrees/scratch/workers/scratch-2/scripts/relay-agent.js\" decision.request --taskId ${task.id} --title <question> --detail <context>\nRecord durable decisions with: node \"C:/Users/workw/.ao/data/worktrees/scratch/workers/scratch-2/scripts/relay-agent.js\" memory.create --title <title> --content <content>\nRelease files when done. Do not invent teammate responses; use the Relay commands and wait for real state changes.`;
+}
 function startAgent(request) {
   const root = canonicalWorkspace(request.workspace); const id = `agent-${crypto.randomUUID()}`; const provider = request.provider;
-  if (provider === 'codex') spawnProcess({ id, executable: config.providers.codex.executable || 'codex', cwd: root, args: ['exec', '--json', '--color', 'never', '--sandbox', 'workspace-write', '--skip-git-repo-check', '-C', root, ...(request.model ? ['-m', request.model] : []), request.prompt] });
-  else if (provider === 'claude') spawnProcess({ id, executable: config.providers.claude.executable || 'claude', cwd: root, args: ['-p', request.prompt, '--output-format', 'stream-json', '--verbose'] });
-  else if (provider === 'opencode') spawnProcess({ id, executable: config.providers.opencode.executable || 'opencode', cwd: root, args: ['run', ...(request.model ? ['--model', request.model] : []), request.prompt] });
+  const task = request.taskId && collaboration.state.tasks[request.taskId] ? collaboration.state.tasks[request.taskId] : collaboration.createTask({ title: request.prompt.slice(0, 120), description: request.prompt, createdBy: config.displayName || 'human', assignee: id, metadata: { provider } });
+  collaboration.registerAgent({ id, name: request.name || `${provider} agent`, provider, ownerId: config.displayName || 'human', taskId: task.id });
+  if (task.assignee !== id) collaboration.assignTask(task.id, id);
+  const prompt = agentContext(id, task, request.prompt);
+  const common = { id, cwd: root, taskId: task.id };
+  if (provider === 'codex') spawnProcess({ ...common, executable: config.providers.codex.executable || 'codex', args: ['exec', '--json', '--color', 'never', '--sandbox', 'workspace-write', '--skip-git-repo-check', '-C', root, ...(request.model ? ['-m', request.model] : []), prompt] });
+  else if (provider === 'claude') spawnProcess({ ...common, executable: config.providers.claude.executable || 'claude', args: ['-p', prompt, '--output-format', 'stream-json', '--verbose'] });
+  else if (provider === 'opencode') spawnProcess({ ...common, executable: config.providers.opencode.executable || 'opencode', args: ['run', ...(request.model ? ['--model', request.model] : []), prompt] });
   else if (provider === 'custom') {
     const template = request.customCommand || config.providers.custom.executable; if (!template) throw new Error('Configure a custom agent command first');
-    const command = template.replaceAll('{prompt}', JSON.stringify(request.prompt)).replaceAll('{workspace}', JSON.stringify(root)); const shell = shellCommand(command); spawnProcess({ id, ...shell, cwd: root });
+    const command = template.replaceAll('{prompt}', JSON.stringify(prompt)).replaceAll('{workspace}', JSON.stringify(root)); const shell = shellCommand(command); spawnProcess({ ...common, ...shell });
   } else if (provider === 'azure') {
     const azure = config.providers.azure; const key = loadSecrets().azure; if (!key) throw new Error('Azure API key is not configured'); if (!azure.endpoint || !azure.deployment) throw new Error('Azure endpoint and deployment are required');
     const endpoint = azure.endpoint.replace(/\/$/, '') + '/openai/v1';
-    spawnProcess({ id, executable: azure.executable || 'codex', cwd: root, env: { AZURE_OPENAI_API_KEY: key }, args: ['exec', '--json', '--color', 'never', '--sandbox', 'workspace-write', '--skip-git-repo-check', '-C', root, '-c', 'model_provider="azure"', '-c', 'model_providers.azure.name="Azure OpenAI"', '-c', `model_providers.azure.base_url="${endpoint}"`, '-c', 'model_providers.azure.env_key="AZURE_OPENAI_API_KEY"', '-c', 'model_providers.azure.wire_api="responses"', '-m', request.model || azure.deployment, request.prompt] });
+    spawnProcess({ ...common, executable: azure.executable || 'codex', env: { AZURE_OPENAI_API_KEY: key }, args: ['exec', '--json', '--color', 'never', '--sandbox', 'workspace-write', '--skip-git-repo-check', '-C', root, '-c', 'model_provider="azure"', '-c', 'model_providers.azure.name="Azure OpenAI"', '-c', `model_providers.azure.base_url="${endpoint}"`, '-c', 'model_providers.azure.env_key="AZURE_OPENAI_API_KEY"', '-c', 'model_providers.azure.wire_api="responses"', '-m', request.model || azure.deployment, prompt] });
   } else throw new Error('Unsupported provider');
-  return id;
+  return { id, taskId: task.id };
 }
 
-const collaboration = createWorkspace(activeWorkspace || appRoot, broadcast);
 async function invoke(command, args) {
   switch (command) {
     case 'detect_tools': return [commandInfo('codex','OpenAI Codex'), commandInfo('claude','Claude Code'), commandInfo('opencode','OpenCode'), commandInfo('az','Azure CLI'), commandInfo('git','Git'), commandInfo('node','Node.js')];
@@ -160,6 +180,8 @@ async function invoke(command, args) {
     case 'run_command': { const root = canonicalWorkspace(); const id = `terminal-${crypto.randomUUID()}`; const shell = shellCommand(args.command); spawnProcess({ id, ...shell, cwd: root }); return id; }
     case 'stop_process': { const child = processes.get(args.id); if (!child) return false; child.kill(); return true; }
     case 'start_agent': return startAgent(args.request);
+    case 'coordination_snapshot': return collaboration.snapshot();
+    case 'coordination_action': return collaboration.action(args.type, args.payload || {}, args.actor || config.displayName || 'human');
     case 'list_skills': return discoverSkills();
     case 'git_status': { const root = canonicalWorkspace(); const out = spawnSync('git', ['status', '--short', '--branch'], { cwd: root, encoding: 'utf8', windowsHide: true }); if (out.error) throw out.error; return String(out.stdout || out.stderr); }
     case 'search_workspace': { const root = canonicalWorkspace(); const query = String(args.query || '').toLowerCase(); return listWorkspace(root).filter(x => !x.isDir && x.path.toLowerCase().includes(query)).slice(0, 200); }
@@ -180,7 +202,7 @@ const server = http.createServer(async (req, res) => {
 const wss = new WebSocket.Server({ server });
 wss.on('connection', socket => {
   clients.add(socket); send(socket, 'backend.ready', { workspace:activeWorkspace, config:{ displayName:config.displayName } }); send(socket, 'state.snapshot', collaboration.snapshot());
-  socket.on('message', raw => { try { const event=JSON.parse(raw); if(event.type==='message.send') { const item={ id:crypto.randomUUID(), from:config.displayName||'User', to:event.payload?.to||'team', text:event.payload?.text||'', kind:'human', at:new Date().toISOString() }; collaboration.state.messages.push(item); broadcast('message', item); } else collaboration.action(event.type,event.payload||{},config.displayName||'user'); } catch(error) { send(socket,'error',{message:error.message}); } });
+  socket.on('message', raw => { try { const event=JSON.parse(raw); collaboration.action(event.type, event.payload || {}, config.displayName || 'human'); } catch(error) { send(socket,'error',{message:error.message}); } });
   socket.on('close',()=>clients.delete(socket));
 });
-const port=Number(process.env.PORT||4173); server.listen(port,'127.0.0.1',()=>console.log(`Relay React IDE: http://127.0.0.1:${port}`));
+const port=Number(process.env.PORT||4173); server.listen(port,'127.0.0.1',()=>console.log(`Relay coordination backend: http://127.0.0.1:${port}`));

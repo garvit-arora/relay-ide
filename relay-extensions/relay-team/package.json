@@ -1,28 +1,86 @@
 {
   "name": "relay-team",
-  "displayName": "Relay AI Team",
-  "description": "Real-time multi-user and multi-agent coordination for Relay IDE.",
+  "displayName": "Relay Agent Workspace",
+  "description": "Real-time agent chat, rooms, tasks, dependencies, file ownership, decisions, and execution streams inside Code-OSS.",
   "version": "0.1.0",
   "publisher": "relay",
   "license": "MIT",
-  "engines": { "vscode": "^1.90.0" },
-  "categories": ["Other", "Machine Learning"],
-  "activationEvents": ["onView:relay.teamView", "onCommand:relay.openOnboarding"],
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other",
+    "Machine Learning"
+  ],
+  "activationEvents": [
+    "onView:relay.teamView",
+    "onCommand:relay.openOnboarding"
+  ],
   "main": "./extension.js",
   "contributes": {
     "commands": [
-      { "command": "relay.openOnboarding", "title": "Relay: Open Onboarding" },
-      { "command": "relay.runAgent", "title": "Relay: Run AI Agent" },
-      { "command": "relay.openWarRoom", "title": "Relay: Open War Room" }
+      {
+        "command": "relay.openOnboarding",
+        "title": "Relay: Open Onboarding"
+      },
+      {
+        "command": "relay.runAgent",
+        "title": "Relay: Run AI Agent"
+      },
+      {
+        "command": "relay.openWarRoom",
+        "title": "Relay: Open War Room"
+      }
     ],
     "viewsContainers": {
-      "activitybar": [{ "id": "relay", "title": "AI Team", "icon": "media/relay.svg" }]
+      "activitybar": [
+        {
+          "id": "relay",
+          "title": "Agents",
+          "icon": "media/relay.svg"
+        }
+      ]
     },
     "views": {
-      "relay": [{ "type": "webview", "id": "relay.teamView", "name": "Workspace Agents" }]
+      "relay": [
+        {
+          "type": "webview",
+          "id": "relay.teamView",
+          "name": "Chat with Agent"
+        }
+      ]
     },
     "menus": {
-      "view/title": [{ "command": "relay.openOnboarding", "when": "view == relay.teamView", "group": "navigation" }]
+      "view/title": [
+        {
+          "command": "relay.openOnboarding",
+          "when": "view == relay.teamView",
+          "group": "navigation"
+        }
+      ]
+    },
+    "themes": [
+      {
+        "label": "Relay Obsidian",
+        "uiTheme": "vs-dark",
+        "path": "./themes/relay-obsidian-color-theme.json"
+      }
+    ],
+    "configurationDefaults": {
+      "workbench.colorTheme": "Relay Obsidian",
+      "workbench.iconTheme": "vs-seti",
+      "workbench.activityBar.location": "top",
+      "workbench.layoutControl.enabled": false,
+      "workbench.editor.showTabs": "multiple",
+      "editor.fontFamily": "JetBrains Mono, Geist Mono, Cascadia Code, Consolas, monospace",
+      "editor.fontLigatures": true,
+      "editor.fontSize": 13,
+      "editor.lineHeight": 21,
+      "editor.minimap.enabled": false,
+      "editor.cursorSmoothCaretAnimation": "on",
+      "editor.smoothScrolling": true,
+      "terminal.integrated.fontFamily": "JetBrains Mono, Cascadia Mono, Consolas, monospace",
+      "terminal.integrated.fontSize": 12
     }
   }
 }

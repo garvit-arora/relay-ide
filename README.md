@@ -19,6 +19,24 @@ Upstream VS Code desktop is tightly coupled to Electron. Replacing Electron insi
 
 ## Current vertical slice
 
+## Live agent coordination
+
+Relay now includes a durable coordination engine (`live-coordinator.js`) used by real agent processes. It persists tasks, dependencies, agent status, rooms, file claims, human decisions, engineering memory, and test results under the Relay application-data directory.
+
+Every launched Codex, Claude Code, OpenCode, Azure, or custom agent receives the current team state plus a real coordination CLI. Agents can call:
+
+```powershell
+node scripts/relay-agent.js message.send --to agent-id --text "I need the auth contract"
+node scripts/relay-agent.js file.claim --file src/auth/provider.ts
+node scripts/relay-agent.js task.dependency --taskId task-id --dependencyId other-task-id
+node scripts/relay-agent.js decision.request --taskId task-id --title "Choose migration mode" --detail "Online or offline?"
+node scripts/relay-agent.js memory.create --title "Auth contract" --content "OAuth providers implement AuthProvider"
+```
+
+These calls update every connected IDE immediately over WebSockets. Completing a dependency sends a real unblock message and changes the waiting agent to `ready`. File claims reject conflicting agents, decisions pause agents for human input, and all state survives backend restarts.
+
+The bundled **Relay Obsidian** theme, typography defaults, Chat with Agent panel, rooms, execution streams, and War Room make Code-OSS feel like a Relay product while retaining the genuine VS Code workbench.
+
 - Real Code-OSS workspace with local file editing.
 - Actual integrated terminal through VS Code/node-pty.
 - Built-in Git and source control.

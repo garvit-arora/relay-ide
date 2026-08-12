@@ -21,8 +21,9 @@ async function waitForServer() {
   throw new Error('backend did not start');
 }
 
-test('React backend provides workspace files and streamed terminal events', async t => {
-  const child = spawn(process.execPath, ['server.js'], { cwd: path.join(__dirname, '..'), env: { ...process.env, PORT: String(port) }, stdio: 'ignore', windowsHide: true });
+test('Relay backend provides workspace files and streamed terminal events', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-server-'));
+  const child = spawn(process.execPath, ['server.js'], { cwd: path.join(__dirname, '..'), env: { ...process.env, PORT: String(port), RELAY_DATA_DIR: path.join(root, '.relay-data'), RELAY_WORKSPACE: root }, stdio: 'ignore', windowsHide: true });
   t.after(() => child.kill());
   await waitForServer();
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-web-'));
